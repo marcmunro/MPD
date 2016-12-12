@@ -480,7 +480,8 @@ ffmpeg_probe(Decoder *decoder, InputStream &is)
 	avpd.filename = is.GetURI();
 
 #ifdef AVPROBE_SCORE_MIME
-#if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(56, 5, 1)
+//MM #if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(56, 5, 1)
+#if 1
 	/* this attribute was added in libav/ffmpeg version 11, but
 	   unfortunately it's "uint8_t" instead of "char", and it's
 	   not "const" - wtf? */

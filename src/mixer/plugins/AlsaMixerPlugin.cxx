@@ -68,6 +68,8 @@ class AlsaMixer final : public Mixer {
 
 	snd_mixer_t *handle;
 	snd_mixer_elem_t *elem;
+	const char *name;
+	bool use_mapper;
 	long volume_min;
 	long volume_max;
 	int volume_set;
@@ -207,6 +209,67 @@ alsa_mixer_lookup_elem(snd_mixer_t *handle, const char *name, unsigned idx)
 	return nullptr;
 }
 
+static int volume_map[] = {
+    	40,
+	51, 61, 71, 81, 90, 99, 108, 116, 123, 129,
+	134, 139, 143, 147, 151, 154, 157, 160, 162, 164,
+	166, 168, 170, 171, 172, 173, 174, 175, 176, 177,
+	178, 179, 180, 181, 182, 183, 184, 185, 186, 187,
+	188, 189, 190, 191, 192, 193, 194, 195, 196, 197,
+	198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+	208, 209, 210, 211, 212, 213, 214, 215, 216, 217,
+	218, 219, 220, 221, 222, 223, 224, 225, 226, 227,
+	228, 229, 230, 231, 232, 233, 234, 235, 236, 237,
+	238, 239, 240, 241, 242, 243, 244, 245, 246, 247};
+
+static int
+mapToHwVol(long in)
+{
+	if (in < 0) {
+	    	return volume_map[0];
+	}
+	else if (in > 100) {
+	    	return volume_map[100];
+	}
+	return volume_map[in];
+}
+
+static int
+mapFromHwVol(int in)
+{
+	if (in > volume_map[100]) {
+		return 100;
+	}
+	else if (in < volume_map[0]) {
+	    	return 0;
+	}
+	int low = 0;
+	int high = 100;
+	int mid = low + ((high - low) / 2);
+	int val;
+	while ((low < high) && (volume_map[mid] != in)) {
+	    	if (volume_map[mid] < in) {
+		    	low = mid + 1;
+		}
+		else {
+		    	high = mid - 1;
+		}
+		mid = low + ((high - low) / 2);    
+	}
+	val = volume_map[mid];
+	if (val < in) {
+	    	if ((in - val) > (volume_map[mid + 1] - in)) {
+		    	mid++;
+		}
+	}
+	else if (val > in) {
+	    	if ((val - in) > (in - volume_map[mid - 1])) {
+		    	mid--;
+		}
+	}
+	return mid;
+}
+
 inline void
 AlsaMixer::Setup()
 {
@@ -225,6 +288,8 @@ AlsaMixer::Setup()
 					 snd_strerror(err));
 
 	elem = alsa_mixer_lookup_elem(handle, control, index);
+	name = snd_mixer_selem_get_name(elem);
+	use_mapper = (strcmp(name, "Playback Digital") == 0);
 	if (elem == nullptr)
 		throw FormatRuntimeError("no such mixer control: %s", control);
 
@@ -289,15 +354,22 @@ AlsaMixer::GetVolume()
 		throw FormatRuntimeError("failed to read ALSA volume: %s",
 					 snd_strerror(err));
 
-	ret = ((volume_set / 100.0) * (volume_max - volume_min)
-	       + volume_min) + 0.5;
-	if (volume_set > 0 && ret == level) {
-		ret = volume_set;
-	} else {
-		ret = (int)(100 * (((float)(level - volume_min)) /
-				   (volume_max - volume_min)) + 0.5);
+	if (use_mapper) {
+	    	ret = mapFromHwVol(level);
+		FormatInfo(alsa_mixer_domain,
+			   "GetVolume(%s): %lu => %d",
+			   name, level, ret);
 	}
-
+	else {
+	    	ret = ((volume_set / 100.0) * (volume_max - volume_min)
+		       + volume_min) + 0.5;
+		if (volume_set > 0 && ret == level) {
+		    	ret = volume_set;
+		} else {
+		    	ret = (int)(100 * (((float)(level - volume_min)) /
+					   (volume_max - volume_min)) + 0.5);
+		}
+	}
 	return ret;
 }
 
@@ -307,7 +379,7 @@ AlsaMixer::SetVolume(unsigned volume)
 	float vol;
 	long level;
 	int err;
-
+	
 	assert(handle != nullptr);
 
 	vol = volume;
@@ -317,8 +389,18 @@ AlsaMixer::SetVolume(unsigned volume)
 	level = (long)(((vol / 100.0) * (volume_max - volume_min) +
 			volume_min) + 0.5);
 	level = Clamp(level, volume_min, volume_max);
+	if (use_mapper) {
+	    	level = mapToHwVol(volume);
+		FormatInfo(alsa_mixer_domain,
+			   "SetVolume(%s): %u => %ld",
+			   name, volume, level);
+	}
+	else {
+	    	level = Clamp(level, volume_min, volume_max);
+	}
 
 	err = snd_mixer_selem_set_playback_volume_all(elem, level);
+
 	if (err < 0)
 		throw FormatRuntimeError("failed to set ALSA volume: %s",
 					 snd_strerror(err));

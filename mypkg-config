@@ -1,0 +1,3 @@
+#! /bin/sh
+
+pkg-config "$@" | sed -e "s!/usr/!${SYSROOT}/usr/!g"
